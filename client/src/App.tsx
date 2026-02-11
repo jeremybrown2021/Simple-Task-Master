@@ -51,7 +51,7 @@ function Layout({ children }: { children: React.ReactNode }) {
             <p className="text-muted-foreground mt-1">Manage your team's work efficiently.</p>
           </div>
 
-          <div className="flex items-center gap-3">
+          {/* <div className="flex items-center gap-3">
             <div className="flex -space-x-2">
               {[1, 2, 3].map((i) => (
                 <div key={i} className="w-8 h-8 rounded-full border-2 border-background bg-muted flex items-center justify-center text-xs font-medium">
@@ -62,7 +62,7 @@ function Layout({ children }: { children: React.ReactNode }) {
                 +2
               </div>
             </div>
-          </div>
+          </div> */}
         </header>
 
         {children}
