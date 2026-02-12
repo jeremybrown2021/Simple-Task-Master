@@ -134,6 +134,10 @@ export async function registerRoutes(
   });
 
   // Auth Endpoints
+  app.get("/api/health", (_req, res) => {
+    res.json({ ok: true });
+  });
+
   app.post(api.auth.login.path, async (req, res) => {
     try {
       const input = api.auth.login.input.parse(req.body);
