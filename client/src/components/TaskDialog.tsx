@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertTaskSchema, type InsertTask } from "@shared/schema";
+import { insertTaskSchema, type InsertTask, type Task } from "@shared/schema";
 import { useCreateTask, useUpdateTask } from "@/hooks/use-tasks";
 import { useUsers } from "@/hooks/use-users";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -11,12 +11,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, User as UserIcon, Send } from "lucide-react";
+import { Loader2, User as UserIcon } from "lucide-react";
 
 interface TaskDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  task?: { id: number } & InsertTask;
+  task?: Task | null;
 }
 
 export function TaskDialog({ open, onOpenChange, task }: TaskDialogProps) {
@@ -44,11 +44,28 @@ export function TaskDialog({ open, onOpenChange, task }: TaskDialogProps) {
   const attachments = form.watch("attachments") || [];
   const dueDate = form.watch("dueDate");
 
+  const parseAttachments = (raw: unknown): any[] => {
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === "string") {
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  };
+
   useEffect(() => {
     if (task) {
-      const formattedDueDate = task.dueDate
-        ? new Date(task.dueDate).toISOString().split("T")[0]
-        : undefined;
+      const formattedDueDate = task.dueDate ? new Date(task.dueDate).toISOString().split("T")[0] : undefined;
+      const normalizedAttachments = parseAttachments(task.attachments).map((a: any) => ({
+        ...(typeof a === "string"
+          ? { name: a, data: a, type: a.startsWith("data:image") ? "image/*" : "file" }
+          : a),
+        reason: (a as any)?.reason || "",
+      }));
       form.reset({
         title: task.title,
         description: task.description || "",
@@ -56,7 +73,7 @@ export function TaskDialog({ open, onOpenChange, task }: TaskDialogProps) {
         status: task.status,
         completed: task.completed,
         assignedToId: task.assignedToId || undefined,
-        attachments: (task.attachments || []).map((a: any) => ({ ...(typeof a === 'string' ? { name: a, data: a, type: a.startsWith('data:image') ? 'image' : 'file' } : a), reason: (a as any)?.reason || "" })),
+        attachments: normalizedAttachments,
         dueDate: formattedDueDate,
       });
     } else {
