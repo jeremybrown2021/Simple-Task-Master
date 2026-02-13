@@ -16,6 +16,7 @@ import { useAuth } from "@/hooks/use-auth";
 interface TaskCardProps {
   task: Task;
   index: number;
+  canEdit: boolean;
   onEdit: (task: Task) => void;
   onDelete: (id: number) => void;
   onView?: (task: Task) => void;
@@ -27,8 +28,9 @@ const priorityColors = {
   high: "bg-orange-50 text-orange-600 border-orange-200",
 };
 
-export function TaskCard({ task, index, onEdit, onDelete, onView }: TaskCardProps) {
+export function TaskCard({ task, index, canEdit, onEdit, onDelete, onView }: TaskCardProps) {
   const { data: users } = useUsers();
+  const { user } = useAuth();
   const rawAssignedToIds = (task as any).assignedToIds;
   let assignedToIds: number[] = [];
   if (Array.isArray(rawAssignedToIds)) {
@@ -45,22 +47,37 @@ export function TaskCard({ task, index, onEdit, onDelete, onView }: TaskCardProp
   }
   if (assignedToIds.length === 0 && task.assignedToId) assignedToIds = [task.assignedToId];
   const assignedUsers = users?.filter((u) => assignedToIds.includes(u.id)) || [];
-  const { user } = useAuth();
+  const createdByUser = users?.find((u) => u.id === task.createdById);
+  const isCreatedByMe = !!user?.id && task.createdById === user.id;
+  const isAssignedToMe = !!user?.id && assignedToIds.includes(user.id);
+  const assignedByLabel = createdByUser
+    ? `${createdByUser.role === "admin" ? "Admin" : createdByUser.name} assigned to you`
+    : "Assigned to you";
+  const relationLabel = isCreatedByMe ? "Created by you" : isAssignedToMe ? assignedByLabel : null;
+  const relationClass = isCreatedByMe
+    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+    : "bg-amber-50 text-amber-700 border-amber-200";
+  const adminAssignmentText = (() => {
+    if (user?.role !== "admin" || !createdByUser || assignedUsers.length === 0) return null;
+    const assignedNames = assignedUsers.map((u) => u.name).join(", ");
+    return `${createdByUser.name} assigned to ${assignedNames}`;
+  })();
 
   return (
-    <Draggable draggableId={String(task.id)} index={index}>
+    <Draggable draggableId={String(task.id)} index={index} isDragDisabled={!canEdit}>
       {(provided, snapshot) => (
         <div
           ref={provided.innerRef}
           {...provided.draggableProps}
-          {...provided.dragHandleProps}
+          {...(canEdit ? provided.dragHandleProps : {})}
           style={provided.draggableProps.style}
           className="mb-3 group"
           onClick={() => onView && onView(task)}
         >
           <Card
             className={`
-              border-border/60 shadow-sm hover:shadow-md transition-all duration-200 cursor-grab active:cursor-grabbing
+              border-border/60 shadow-sm hover:shadow-md transition-all duration-200
+              ${canEdit ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}
               ${snapshot.isDragging ? "shadow-xl ring-2 ring-primary/20 rotate-2" : ""}
             `}
           >
@@ -70,38 +87,51 @@ export function TaskCard({ task, index, onEdit, onDelete, onView }: TaskCardProp
                   {task.priority}
                 </Badge>
 
-                <DropdownMenu>
-                  {user?.role === "admin" && (
+                {canEdit && (
+                  <DropdownMenu>
                     <DropdownMenuTrigger
                       className="opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100 outline-none"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <MoreHorizontal className="w-4 h-4 text-muted-foreground hover:text-foreground" />
                     </DropdownMenuTrigger>
-                  )}
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onEdit(task);
-                      }}
-                    >
-                      Edit
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      className="text-destructive focus:text-destructive"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDelete(task.id);
-                      }}
-                    >
-                      Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onEdit(task);
+                        }}
+                      >
+                        Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="text-destructive focus:text-destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDelete(task.id);
+                        }}
+                      >
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
               </div>
 
               <h4 className="font-semibold text-sm mb-1 line-clamp-2">{task.title}</h4>
+              {relationLabel && (
+                <Badge variant="outline" className={`mb-2 text-[10px] font-medium ${relationClass}`}>
+                  {relationLabel}
+                </Badge>
+              )}
+              {adminAssignmentText && (
+                <Badge
+                  variant="outline"
+                  className="mb-2 text-[10px] font-medium bg-sky-50 text-sky-700 border-sky-200"
+                >
+                  {adminAssignmentText}
+                </Badge>
+              )}
               <p className="text-xs text-muted-foreground line-clamp-2 mb-3 min-h-[1.5em]">
                 {task.description || "No description provided."}
               </p>
@@ -166,9 +196,11 @@ export function TaskCard({ task, index, onEdit, onDelete, onView }: TaskCardProp
                     <Clock className="w-3 h-3 mr-1" />
                     <span>{new Date(task.dueDate!).toLocaleDateString()}</span>
                   </div>
-                  <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                    <GripVertical className="w-4 h-4 text-muted-foreground/50" />
-                  </div>
+                  {canEdit && (
+                    <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                      <GripVertical className="w-4 h-4 text-muted-foreground/50" />
+                    </div>
+                  )}
                 </div>
               </div>
             </CardContent>

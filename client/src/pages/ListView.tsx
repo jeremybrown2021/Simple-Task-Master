@@ -17,10 +17,12 @@ import { Button } from "@/components/ui/button";
 import { Loader2, Pencil, Trash2, CalendarDays, User as UserIcon } from "lucide-react";
 import { format } from "date-fns";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { useAuth } from "@/hooks/use-auth";
 
 export default function ListView() {
   const { data: tasks, isLoading } = useTasks();
   const { data: users } = useUsers();
+  const { user } = useAuth();
   const deleteTask = useDeleteTask();
   const { toast } = useToast();
   
@@ -60,6 +62,29 @@ export default function ListView() {
     );
   }
 
+  const visibleTasks = (tasks || []).filter((task) => {
+    if (user?.role === "admin") return true;
+    if (!user?.id) return false;
+    if (task.createdById === user.id) return true;
+
+    const rawAssignedToIds = (task as any).assignedToIds;
+    let assignedToIds: number[] = [];
+    if (Array.isArray(rawAssignedToIds)) {
+      assignedToIds = rawAssignedToIds.map((id: any) => Number(id)).filter((id: number) => Number.isFinite(id));
+    } else if (typeof rawAssignedToIds === "string") {
+      try {
+        const parsed = JSON.parse(rawAssignedToIds);
+        if (Array.isArray(parsed)) {
+          assignedToIds = parsed.map((id: any) => Number(id)).filter((id: number) => Number.isFinite(id));
+        }
+      } catch {
+        assignedToIds = [];
+      }
+    }
+    if (assignedToIds.length === 0 && task.assignedToId) assignedToIds = [task.assignedToId];
+    return assignedToIds.includes(user.id);
+  });
+
   return (
     <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
       <Table>
@@ -74,14 +99,15 @@ export default function ListView() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {tasks?.length === 0 ? (
+          {visibleTasks.length === 0 ? (
             <TableRow>
               <TableCell colSpan={6} className="h-48 text-center text-muted-foreground">
                 No tasks found. Create one to get started!
               </TableCell>
             </TableRow>
           ) : (
-            tasks?.map((task) => {
+            visibleTasks.map((task) => {
+              const canEdit = !!user?.id && task.createdById === user.id;
               const rawAssignedToIds = (task as any).assignedToIds;
               let assignedToIds: number[] = [];
               if (Array.isArray(rawAssignedToIds)) {
@@ -151,27 +177,31 @@ export default function ListView() {
                     </div>
                   </TableCell>
                   <TableCell className="text-right">
-                    <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="h-8 w-8 text-muted-foreground hover:text-primary"
-                        onClick={() => {
-                          setEditingTask(task);
-                          setIsDialogOpen(true);
-                        }}
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                        onClick={() => handleDelete(task.id)}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
+                    {canEdit ? (
+                      <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-primary"
+                          onClick={() => {
+                            setEditingTask(task);
+                            setIsDialogOpen(true);
+                          }}
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={() => handleDelete(task.id)}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">View only</span>
+                    )}
                   </TableCell>
                 </TableRow>
               );

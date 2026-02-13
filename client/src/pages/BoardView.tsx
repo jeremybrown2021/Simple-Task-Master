@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DragDropContext, Droppable, DropResult } from "@hello-pangea/dnd";
 import { useTasks, useUpdateTask, useDeleteTask } from "@/hooks/use-tasks";
 import { TaskCard } from "@/components/TaskCard";
@@ -6,8 +6,11 @@ import { TaskDialog } from "@/components/TaskDialog";
 import { TaskDetailDialog } from "@/components/TaskDetailDialog";
 import { type Task } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Plus } from "lucide-react";
+import { Loader2, Plus, RotateCcw } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { useUsers } from "@/hooks/use-users";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 const COLUMNS = [
   { id: "todo", title: "To Do", color: "bg-slate-500" },
@@ -15,8 +18,25 @@ const COLUMNS = [
   { id: "done", title: "Done", color: "bg-green-500" },
 ];
 
+function getAssignedToIds(task: Task): number[] {
+  const rawAssignedToIds = (task as any).assignedToIds;
+  let assignedToIds: number[] = [];
+  if (Array.isArray(rawAssignedToIds)) assignedToIds = rawAssignedToIds.map((id: unknown) => Number(id)).filter((id) => Number.isFinite(id));
+  else if (typeof rawAssignedToIds === "string") {
+    try {
+      const parsed = JSON.parse(rawAssignedToIds);
+      if (Array.isArray(parsed)) assignedToIds = parsed.map((id: unknown) => Number(id)).filter((id) => Number.isFinite(id));
+    } catch {
+      assignedToIds = [];
+    }
+  }
+  if (assignedToIds.length === 0 && task.assignedToId) assignedToIds = [task.assignedToId];
+  return assignedToIds;
+}
+
 export default function BoardView() {
   const { data: tasks, isLoading } = useTasks();
+  const { data: users } = useUsers();
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
   const { toast } = useToast();
@@ -26,6 +46,11 @@ export default function BoardView() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [priorityFilter, setPriorityFilter] = useState("all");
+  const [ownershipFilter, setOwnershipFilter] = useState("all");
+  const [assigneeFilter, setAssigneeFilter] = useState("all");
+  const [dueFilter, setDueFilter] = useState("all");
 
   const onDragEnd = (result: DropResult) => {
     const { destination, source, draggableId } = result;
@@ -33,11 +58,23 @@ export default function BoardView() {
     if (!destination) return;
     if (destination.droppableId === source.droppableId && destination.index === source.index) return;
 
+    const taskId = parseInt(draggableId);
+    const draggedTask = visibleTasks.find((task) => task.id === taskId);
+    const canEditDraggedTask = !!user?.id && !!draggedTask && draggedTask.createdById === user.id;
+    if (!canEditDraggedTask) {
+      toast({
+        title: "Read-only task",
+        description: "Only the task creator can edit task status.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const newStatus = destination.droppableId;
 
     // Optimistic update handled by React Query invalidation
     updateTask.mutate({
-      id: parseInt(draggableId),
+      id: taskId,
       status: newStatus
     }, {
       onError: () => {
@@ -63,11 +100,100 @@ export default function BoardView() {
   };
 
   const handleView = (task: Task) => {
-    if (user?.role !== "admin") {
+    const canEditTask = !!user?.id && task.createdById === user.id;
+    if (!canEditTask) {
       setSelectedTask(task);
       setIsDetailDialogOpen(true);
     }
   };
+
+  const baseVisibleTasks = (tasks || []).filter((task) => {
+    if (user?.role === "admin") return true;
+    if (!user?.id) return false;
+    if (task.createdById === user.id) return true;
+
+    const assignedToIds = getAssignedToIds(task);
+    return assignedToIds.includes(user.id);
+  });
+
+  const visibleTasks = useMemo(() => {
+    return baseVisibleTasks.filter((task) => {
+      const assignedToIds = getAssignedToIds(task);
+      const normalizedSearch = searchQuery.trim().toLowerCase();
+      const taskText = `${task.title} ${task.description || ""}`.toLowerCase();
+
+      const now = new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      const dueDate = task.dueDate ? new Date(task.dueDate as any) : null;
+      const hasDueDate = !!dueDate && !Number.isNaN(dueDate.getTime());
+      const dueTime = hasDueDate ? dueDate.getTime() : null;
+      const startOfTodayTime = startOfToday.getTime();
+      const endOfTodayTime = endOfToday.getTime();
+
+      if (normalizedSearch && !taskText.includes(normalizedSearch)) return false;
+      if (priorityFilter !== "all" && task.priority !== priorityFilter) return false;
+
+      if (ownershipFilter === "created_by_me") {
+        if (!user?.id || task.createdById !== user.id) return false;
+      }
+      if (ownershipFilter === "assigned_to_me") {
+        if (!user?.id || !assignedToIds.includes(user.id)) return false;
+      }
+
+      if (assigneeFilter === "me") {
+        if (!user?.id || !assignedToIds.includes(user.id)) return false;
+      } else if (assigneeFilter === "unassigned") {
+        if (assignedToIds.length > 0) return false;
+      } else if (assigneeFilter !== "all") {
+        const selectedAssigneeId = Number(assigneeFilter);
+        if (!Number.isFinite(selectedAssigneeId) || !assignedToIds.includes(selectedAssigneeId)) return false;
+      }
+
+      if (dueFilter === "overdue") {
+        if (!hasDueDate || dueTime === null || dueTime >= startOfTodayTime) return false;
+      } else if (dueFilter === "today") {
+        if (!hasDueDate || dueTime === null || dueTime < startOfTodayTime || dueTime > endOfTodayTime) return false;
+      } else if (dueFilter === "upcoming") {
+        if (!hasDueDate || dueTime === null || dueTime <= endOfTodayTime) return false;
+      } else if (dueFilter === "no_due") {
+        if (hasDueDate) return false;
+      }
+
+      return true;
+    });
+  }, [assigneeFilter, baseVisibleTasks, dueFilter, ownershipFilter, priorityFilter, searchQuery, user?.id]);
+
+  const filterUserOptions = useMemo(() => {
+    const visibleUserIds = new Set<number>();
+    baseVisibleTasks.forEach((task) => {
+      getAssignedToIds(task).forEach((id) => visibleUserIds.add(id));
+    });
+    return (users || []).filter((u) => visibleUserIds.has(u.id));
+  }, [baseVisibleTasks, users]);
+
+  useEffect(() => {
+    const allowedAssigneeValues = new Set<string>(["all", "me", "unassigned"]);
+    filterUserOptions.forEach((filterUser) => allowedAssigneeValues.add(String(filterUser.id)));
+    if (!allowedAssigneeValues.has(assigneeFilter)) {
+      setAssigneeFilter("all");
+    }
+  }, [assigneeFilter, filterUserOptions]);
+
+  const resetFilters = () => {
+    setSearchQuery("");
+    setPriorityFilter("all");
+    setOwnershipFilter("all");
+    setAssigneeFilter("all");
+    setDueFilter("all");
+  };
+
+  const tasksByStatus = visibleTasks.reduce((acc, task) => {
+    const status = task.status || "todo";
+    if (!acc[status]) acc[status] = [];
+    acc[status].push(task);
+    return acc;
+  }, {} as Record<string, Task[]>);
 
   if (isLoading) {
     return (
@@ -77,33 +203,77 @@ export default function BoardView() {
     );
   }
 
-  const visibleTasks = user?.role === "admin"
-    ? (tasks || [])
-    : (tasks || []).filter((task) => {
-      const rawAssignedToIds = (task as any).assignedToIds;
-      let assignedToIds: number[] = [];
-      if (Array.isArray(rawAssignedToIds)) assignedToIds = rawAssignedToIds;
-      else if (typeof rawAssignedToIds === "string") {
-        try {
-          const parsed = JSON.parse(rawAssignedToIds);
-          if (Array.isArray(parsed)) assignedToIds = parsed;
-        } catch {
-          assignedToIds = [];
-        }
-      }
-      if (assignedToIds.length === 0 && task.assignedToId) assignedToIds = [task.assignedToId];
-      return !!user?.id && assignedToIds.includes(user.id);
-    });
-
-  const tasksByStatus = visibleTasks.reduce((acc, task) => {
-    const status = task.status || "todo";
-    if (!acc[status]) acc[status] = [];
-    acc[status].push(task);
-    return acc;
-  }, {} as Record<string, Task[]>);
-
   return (
     <div className="h-full overflow-x-auto pb-4">
+      <div className="mb-4 rounded-xl border border-border/60 bg-card p-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <Input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by title or description"
+            className="xl:col-span-2"
+          />
+
+          <select
+            value={priorityFilter}
+            onChange={(e) => setPriorityFilter(e.target.value)}
+            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+          >
+            <option value="all">All priorities</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+
+          <select
+            value={ownershipFilter}
+            onChange={(e) => setOwnershipFilter(e.target.value)}
+            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+          >
+            <option value="all">All relations</option>
+            <option value="created_by_me">Created by me</option>
+            <option value="assigned_to_me">Assigned to me</option>
+          </select>
+
+          <select
+            value={assigneeFilter}
+            onChange={(e) => setAssigneeFilter(e.target.value)}
+            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+          >
+            <option value="all">All assignees</option>
+            <option value="me">Assigned to me</option>
+            <option value="unassigned">Unassigned</option>
+            {filterUserOptions.map((filterUser) => (
+              <option key={filterUser.id} value={String(filterUser.id)}>
+                {filterUser.name}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={dueFilter}
+            onChange={(e) => setDueFilter(e.target.value)}
+            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+          >
+            <option value="all">All due dates</option>
+            <option value="overdue">Overdue</option>
+            <option value="today">Due today</option>
+            <option value="upcoming">Upcoming</option>
+            <option value="no_due">No due date</option>
+          </select>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between">
+          <p className="text-xs text-muted-foreground">
+            Showing {visibleTasks.length} of {baseVisibleTasks.length} tasks
+          </p>
+          <Button variant="ghost" size="sm" onClick={resetFilters} className="gap-2">
+            <RotateCcw className="h-3.5 w-3.5" />
+            Reset filters
+          </Button>
+        </div>
+      </div>
+
       <DragDropContext onDragEnd={onDragEnd}>
         <div className="flex gap-6 h-full min-w-[1000px]">
           {COLUMNS.map((column) => (
@@ -133,6 +303,7 @@ export default function BoardView() {
                           key={task.id}
                           task={task}
                           index={index}
+                          canEdit={!!user?.id && task.createdById === user.id}
                           onEdit={handleEdit}
                           onDelete={handleDelete}
                           onView={handleView}
@@ -140,7 +311,7 @@ export default function BoardView() {
                       ))}
                       {provided.placeholder}
 
-                      {user?.role === "admin" && (
+                      {!!user?.id && (
                         <button
                           onClick={() => {
                             setEditingTask(null);

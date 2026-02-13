@@ -30,6 +30,37 @@ function verifyPassword(password: string, hash: string): boolean {
   return hashPassword(password) === hash;
 }
 
+function getAssignedUserIds(task: any): number[] {
+  const rawAssignedToIds = task?.assignedToIds;
+  if (Array.isArray(rawAssignedToIds)) {
+    const ids = rawAssignedToIds.map((id: unknown) => Number(id)).filter((id) => Number.isFinite(id));
+    if (ids.length > 0) return ids;
+  }
+
+  if (typeof rawAssignedToIds === "string") {
+    try {
+      const parsed = JSON.parse(rawAssignedToIds);
+      if (Array.isArray(parsed)) {
+        const ids = parsed.map((id: unknown) => Number(id)).filter((id) => Number.isFinite(id));
+        if (ids.length > 0) return ids;
+      }
+    } catch {
+      // ignore invalid payload
+    }
+  }
+
+  if (typeof task?.assignedToId === "number" && Number.isFinite(task.assignedToId)) {
+    return [task.assignedToId];
+  }
+  return [];
+}
+
+function canUserAccessTask(user: any, task: any): boolean {
+  if (!user || !task) return false;
+  if (task.createdById === user.id) return true;
+  return getAssignedUserIds(task).includes(user.id);
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -265,22 +296,37 @@ export async function registerRoutes(
 
   // Tasks API
   app.get(api.tasks.list.path, async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+
     const tasks = await storage.getTasks();
-    res.json(tasks);
+    if (req.user.role === "admin") {
+      return res.json(tasks);
+    }
+
+    const visibleTasks = tasks.filter((task) => canUserAccessTask(req.user, task));
+    res.json(visibleTasks);
   });
 
   app.get(api.tasks.get.path, async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+
     const task = await storage.getTask(Number(req.params.id));
     if (!task) {
       return res.status(404).json({ message: 'Task not found' });
+    }
+    if (req.user.role !== "admin" && !canUserAccessTask(req.user, task)) {
+      return res.status(403).json({ message: "Not authorized to view this task" });
     }
     res.json(task);
   });
 
   app.post(api.tasks.create.path, async (req, res) => {
-    // Only admins can create tasks
-    if (!req.user || req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Only admins can create tasks' });
+    if (!req.user) {
+      return res.status(401).json({ message: "Not authenticated" });
     }
 
     try {
@@ -302,6 +348,10 @@ export async function registerRoutes(
   });
 
   app.patch(api.tasks.update.path, async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+
     try {
       const id = Number(req.params.id);
       const input = api.tasks.update.input.parse(req.body);
@@ -310,8 +360,13 @@ export async function registerRoutes(
       if (!existing) {
         return res.status(404).json({ message: 'Task not found' });
       }
+      if (existing.createdById !== req.user.id) {
+        return res.status(403).json({ message: "Only the task creator can edit this task" });
+      }
 
-      const updated = await storage.updateTask(id, input);
+      const { createdById: _createdById, ...safeInput } = (input as any) || {};
+
+      const updated = await storage.updateTask(id, safeInput);
       res.json(updated);
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -325,10 +380,17 @@ export async function registerRoutes(
   });
 
   app.delete(api.tasks.delete.path, async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+
     const id = Number(req.params.id);
     const existing = await storage.getTask(id);
     if (!existing) {
       return res.status(404).json({ message: 'Task not found' });
+    }
+    if (existing.createdById !== req.user.id) {
+      return res.status(403).json({ message: "Only the task creator can delete this task" });
     }
     await storage.deleteTask(id);
     res.status(204).send();
