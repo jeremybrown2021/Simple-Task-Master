@@ -29,7 +29,21 @@ export function Sidebar({
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${protocol}://${window.location.host}/ws?userId=${user.id}`);
 
-    ws.onmessage = () => {
+    ws.onmessage = (event) => {
+      let parsed: any = null;
+      try {
+        parsed = JSON.parse(String(event.data || "{}"));
+      } catch {
+        parsed = null;
+      }
+
+      const type = parsed?.type;
+
+      if (type === "task:changed") {
+        queryClient.invalidateQueries({ queryKey: [api.tasks.list.path] });
+        queryClient.invalidateQueries({ queryKey: [api.tasks.get.path] });
+      }
+
       queryClient.invalidateQueries({ queryKey: [api.chats.unread.path] });
       queryClient.invalidateQueries({ queryKey: [api.chats.list.path] });
       queryClient.invalidateQueries({ queryKey: [api.chats.groups.path] });

@@ -120,6 +120,34 @@ export async function registerRoutes(
     emitToUser(userId, { type: "unread:update", payload: counts });
   };
 
+  const pushTaskUpdateToRelevantUsers = async (
+    action: "created" | "updated" | "deleted",
+    task: any
+  ) => {
+    if (!task) return;
+    const recipientIds = new Set<number>();
+    if (typeof task.createdById === "number" && Number.isFinite(task.createdById)) {
+      recipientIds.add(task.createdById);
+    }
+    getAssignedUserIds(task).forEach((id) => recipientIds.add(id));
+
+    const allUsers = await storage.getUsers();
+    allUsers
+      .filter((u) => u.role === "admin")
+      .forEach((admin) => recipientIds.add(admin.id));
+
+    recipientIds.forEach((userId) => {
+      emitToUser(userId, {
+        type: "task:changed",
+        payload: {
+          action,
+          taskId: task.id,
+          status: task.status,
+        },
+      });
+    });
+  };
+
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
   wss.on("connection", async (socket, req) => {
     const url = new URL(req.url || "", "http://localhost");
@@ -344,6 +372,7 @@ export async function registerRoutes(
         ...input,
         createdById: req.user.id,
       });
+      await pushTaskUpdateToRelevantUsers("created", task);
       res.status(201).json(task);
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -384,6 +413,7 @@ export async function registerRoutes(
       const { createdById: _createdById, ...safeInput } = (input as any) || {};
 
       const updated = await storage.updateTask(id, safeInput);
+      await pushTaskUpdateToRelevantUsers("updated", updated);
       res.json(updated);
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -410,6 +440,7 @@ export async function registerRoutes(
       return res.status(403).json({ message: "Only the task creator can delete this task" });
     }
     await storage.deleteTask(id);
+    await pushTaskUpdateToRelevantUsers("deleted", existing);
     res.status(204).send();
   });
 

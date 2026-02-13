@@ -56,6 +56,19 @@ export function useCreateTask() {
 export function useUpdateTask() {
   const queryClient = useQueryClient();
   return useMutation({
+    onMutate: async ({ id, ...updates }: { id: number } & Partial<TaskInput>) => {
+      await queryClient.cancelQueries({ queryKey: [api.tasks.list.path] });
+      const previousTasks = queryClient.getQueryData<any[]>([api.tasks.list.path]);
+
+      if (previousTasks) {
+        queryClient.setQueryData([api.tasks.list.path], previousTasks.map((task) => {
+          if (task.id !== id) return task;
+          return { ...task, ...updates };
+        }));
+      }
+
+      return { previousTasks };
+    },
     mutationFn: async ({ id, ...updates }: { id: number } & Partial<TaskInput>) => {
       const validated = api.tasks.update.input.parse(updates);
       const url = buildUrl(api.tasks.update.path, { id });
@@ -66,6 +79,11 @@ export function useUpdateTask() {
       });
       if (!res.ok) throw new Error("Failed to update task");
       return api.tasks.update.responses[200].parse(await res.json());
+    },
+    onError: (_err, _variables, context) => {
+      if (context?.previousTasks) {
+        queryClient.setQueryData([api.tasks.list.path], context.previousTasks);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.tasks.list.path] });
