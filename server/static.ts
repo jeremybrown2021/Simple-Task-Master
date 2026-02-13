@@ -11,10 +11,13 @@ export function serveStatic(app: Express) {
   }
 
   const appBasePath = (process.env.APP_BASE_PATH || "/app").replace(/\/+$/, "");
+  const assetsPath = path.resolve(distPath, "assets");
 
   // Serve static assets for both root and sub-path deployments.
   app.use(express.static(distPath));
   app.use(appBasePath, express.static(distPath));
+  app.use("/assets", express.static(assetsPath));
+  app.use(`${appBasePath}/assets`, express.static(assetsPath));
 
   const serveIndex = (req: express.Request, res: express.Response) => {
     // Never return HTML for asset-like requests (prevents JS MIME errors).
