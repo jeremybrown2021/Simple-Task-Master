@@ -204,7 +204,7 @@ export default function BoardView() {
   }
 
   return (
-    <div className="h-full overflow-x-auto pb-4">
+    <div className="h-full pb-4">
       <div className="mb-4 rounded-xl border border-border/60 bg-card p-3">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
           <Input
@@ -217,7 +217,7 @@ export default function BoardView() {
           <select
             value={priorityFilter}
             onChange={(e) => setPriorityFilter(e.target.value)}
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+            className="h-10 rounded-md border border-input bg-background px-3 text-sm w-full"
           >
             <option value="all">All priorities</option>
             <option value="high">High</option>
@@ -228,7 +228,7 @@ export default function BoardView() {
           <select
             value={ownershipFilter}
             onChange={(e) => setOwnershipFilter(e.target.value)}
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+            className="h-10 rounded-md border border-input bg-background px-3 text-sm w-full"
           >
             <option value="all">All relations</option>
             <option value="created_by_me">Created by me</option>
@@ -238,7 +238,7 @@ export default function BoardView() {
           <select
             value={assigneeFilter}
             onChange={(e) => setAssigneeFilter(e.target.value)}
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+            className="h-10 rounded-md border border-input bg-background px-3 text-sm w-full"
           >
             <option value="all">All assignees</option>
             <option value="me">Assigned to me</option>
@@ -253,7 +253,7 @@ export default function BoardView() {
           <select
             value={dueFilter}
             onChange={(e) => setDueFilter(e.target.value)}
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+            className="h-10 rounded-md border border-input bg-background px-3 text-sm w-full"
           >
             <option value="all">All due dates</option>
             <option value="overdue">Overdue</option>
@@ -263,7 +263,7 @@ export default function BoardView() {
           </select>
         </div>
 
-        <div className="mt-3 flex items-center justify-between">
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-muted-foreground">
             Showing {visibleTasks.length} of {baseVisibleTasks.length} tasks
           </p>
@@ -275,9 +275,9 @@ export default function BoardView() {
       </div>
 
       <DragDropContext onDragEnd={onDragEnd}>
-        <div className="flex gap-6 h-full min-w-[1000px]">
+        <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 h-full">
           {COLUMNS.map((column) => (
-            <div key={column.id} className="flex-1 flex flex-col min-w-[300px]">
+            <div key={column.id} className="flex-1 flex flex-col min-w-0 lg:min-w-[300px]">
               <div className="flex items-center justify-between mb-4 px-1">
                 <div className="flex items-center gap-2">
                   <div className={`w-2 h-2 rounded-full ${column.color}`} />

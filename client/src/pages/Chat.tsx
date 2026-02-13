@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Loader2, Mic, MicOff, Phone, PhoneOff, Search, Send } from "lucide-react";
+import { ChevronLeft, Loader2, Mic, MicOff, Phone, PhoneOff, Search, Send } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useMarkChatRead, useMessages, useSendMessage, useUnreadCounts } from "@/hooks/use-chat";
 import { useUsers } from "@/hooks/use-users";
@@ -471,8 +471,8 @@ export default function Chat() {
   }
 
   return (
-    <div className="h-[calc(100vh-10rem)] border border-border rounded-xl overflow-hidden bg-card grid grid-cols-[280px_1fr]">
-      <aside className="border-r border-border/60 bg-muted/20 flex flex-col min-h-0">
+    <div className="h-[calc(100vh-7.5rem)] md:h-[calc(100vh-10rem)] border border-border rounded-xl overflow-hidden bg-card grid grid-cols-1 md:grid-cols-[280px_1fr]">
+      <aside className={`border-r border-border/60 bg-muted/20 flex-col min-h-0 ${activeUserId ? "hidden md:flex" : "flex"}`}>
         <div className="p-4 border-b border-border/60 shrink-0">
           <h3 className="font-semibold text-sm text-foreground">Team Chat</h3>
           <p className="text-xs text-muted-foreground mt-1">Search and select a team user</p>
@@ -531,14 +531,25 @@ export default function Chat() {
         </div>
       </aside>
 
-      <section className="flex flex-col min-h-0">
+      <section className={`flex-col min-h-0 ${!activeUserId ? "hidden md:flex" : "flex"}`}>
         <div className="px-5 py-4 border-b border-border/60 bg-background">
-          <div className="flex items-center justify-between gap-2">
-            <div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="md:hidden h-8 w-8"
+                onClick={() => setActiveUserId(undefined)}
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
+              <div>
               <h3 className="font-semibold">{activeUser?.name || "Select user"}</h3>
               <p className="text-xs text-muted-foreground">Logged in as {user?.name}</p>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="button"
                 variant="outline"
@@ -546,8 +557,8 @@ export default function Chat() {
                 disabled={!activeUserId || isCalling || isInCall}
                 onClick={() => void startCall()}
               >
-                <Phone className="w-4 h-4 mr-2" />
-                Call
+                <Phone className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Call</span>
               </Button>
               <Button
                 type="button"
@@ -556,8 +567,8 @@ export default function Chat() {
                 disabled={!isCalling && !isInCall}
                 onClick={toggleMute}
               >
-                {isMuted ? <MicOff className="w-4 h-4 mr-2" /> : <Mic className="w-4 h-4 mr-2" />}
-                {isMuted ? "Unmute" : "Mute"}
+                {isMuted ? <MicOff className="w-4 h-4 sm:mr-2" /> : <Mic className="w-4 h-4 sm:mr-2" />}
+                <span className="hidden sm:inline">{isMuted ? "Unmute" : "Mute"}</span>
               </Button>
               <Button
                 type="button"
@@ -566,8 +577,8 @@ export default function Chat() {
                 disabled={!isCalling && !isInCall}
                 onClick={() => stopCurrentSession(true)}
               >
-                <PhoneOff className="w-4 h-4 mr-2" />
-                End
+                <PhoneOff className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">End</span>
               </Button>
             </div>
           </div>
@@ -618,7 +629,7 @@ export default function Chat() {
               return (
                 <div key={msg.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
                   <div
-                    className={`max-w-[70%] rounded-2xl px-3 py-2 border ${mine
+                    className={`max-w-[85%] md:max-w-[70%] rounded-2xl px-3 py-2 border ${mine
                       ? "bg-primary text-primary-foreground border-primary/30"
                       : "bg-muted/40 text-foreground border-border"
                       }`}

@@ -87,14 +87,15 @@ export default function ListView() {
 
   return (
     <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
+      <div className="overflow-x-auto">
       <Table>
         <TableHeader className="bg-muted/30">
           <TableRow>
-            <TableHead className="w-[35%]">Task Details</TableHead>
-            <TableHead>Assigned To</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Priority</TableHead>
-            <TableHead>Due Date</TableHead>
+            <TableHead className="min-w-[220px]">Task Details</TableHead>
+            <TableHead className="min-w-[170px]">Assigned To</TableHead>
+            <TableHead className="min-w-[120px]">Status</TableHead>
+            <TableHead className="hidden md:table-cell min-w-[110px]">Priority</TableHead>
+            <TableHead className="hidden lg:table-cell min-w-[140px]">Due Date</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
         </TableHeader>
@@ -165,12 +166,12 @@ export default function ListView() {
                       {task.status.replace('_', ' ')}
                     </Badge>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden md:table-cell">
                     <Badge variant="outline" className={`capitalize font-medium ${getPriorityColor(task.priority)}`}>
                       {task.priority}
                     </Badge>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden lg:table-cell">
                     <div className="flex items-center text-xs text-muted-foreground">
                       <CalendarDays className="w-3 h-3 mr-1.5" />
                       {task.createdAt ? format(new Date(task.createdAt), "MMM d, yyyy") : "-"}
@@ -209,6 +210,7 @@ export default function ListView() {
           )}
         </TableBody>
       </Table>
+      </div>
 
       <TaskDialog 
         open={isDialogOpen} 

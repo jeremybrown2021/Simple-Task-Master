@@ -74,7 +74,7 @@ export default function AdminConsole() {
             {/* System Stats Card */}
             <Card className="p-6">
                 <h3 className="text-xl font-semibold mb-4">System Statistics</h3>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div className="text-center p-4 bg-muted rounded-lg">
                         <div className="text-2xl font-bold">{users.length}</div>
                         <p className="text-sm text-muted-foreground mt-1">Total Users</p>

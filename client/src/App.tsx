@@ -10,6 +10,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { useState } from "react";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/Login";
+import { Button } from "@/components/ui/button";
+import { Menu } from "lucide-react";
 
 // Pages
 import Overview from "@/pages/Overview";
@@ -70,6 +72,7 @@ function Router() {
 function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [location] = useLocation();
 
   const getPageTitle = (path: string) => {
@@ -90,18 +93,33 @@ function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background font-sans flex">
-      <Sidebar onNewTask={() => setIsDialogOpen(true)} />
+      <Sidebar
+        onNewTask={() => setIsDialogOpen(true)}
+        mobileOpen={isMobileSidebarOpen}
+        onMobileOpenChange={setIsMobileSidebarOpen}
+      />
 
-      <main className="flex-1 ml-64 p-8 overflow-y-auto h-screen">
-        <header className="mb-8 flex items-center justify-between animate-in">
-          <div>
-            <h1 className="text-3xl font-bold text-foreground">{getPageTitle(location)}</h1>
-            <p className="text-muted-foreground mt-1">Manage your team's work efficiently.</p>
+      <main className="flex-1 md:ml-64 p-4 md:p-8 overflow-y-auto min-h-screen">
+        <header className="mb-6 md:mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between animate-in">
+          <div className="flex items-start gap-3">
+            <Button
+              variant="outline"
+              size="icon"
+              className="md:hidden"
+              onClick={() => setIsMobileSidebarOpen(true)}
+              aria-label="Open navigation menu"
+            >
+              <Menu className="h-4 w-4" />
+            </Button>
+            <div>
+              <h1 className="text-2xl md:text-3xl font-bold text-foreground">{getPageTitle(location)}</h1>
+              <p className="text-muted-foreground mt-1 text-sm md:text-base">Manage your team's work efficiently.</p>
+            </div>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="text-right">
-              <p className="text-sm font-medium text-foreground">{user.name}</p>
+          <div className="flex items-center justify-between md:justify-end gap-3 md:gap-4">
+            <div className="text-left md:text-right min-w-0">
+              <p className="text-sm font-medium text-foreground truncate">{user.name}</p>
               <p className="text-xs text-muted-foreground capitalize">{user.role}</p>
             </div>
             <button
@@ -109,7 +127,7 @@ function Layout({ children }: { children: React.ReactNode }) {
                 logout();
                 window.location.href = '/login';
               }}
-              className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-sm font-medium transition-colors"
+              className="px-3 md:px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-sm font-medium transition-colors"
             >
               Logout
             </button>
