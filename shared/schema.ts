@@ -1,61 +1,61 @@
-import { pgTable, text, serial, boolean, timestamp, integer, uniqueIndex } from "drizzle-orm/pg-core";
+import { mysqlTable, text, int, boolean, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export const users = pgTable("users", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  email: text("email").notNull().unique(),
-  password: text("password").notNull().default("5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"), // hash of "password"
-  role: text("role").notNull().default("user"), // user, admin
+export const users = mysqlTable("users", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  email: varchar("email", { length: 255 }).notNull().unique(),
+  password: varchar("password", { length: 255 }).notNull().default("5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"), // hash of "password"
+  role: varchar("role", { length: 20 }).notNull().default("user"), // user, admin
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const tasks = pgTable("tasks", {
-  id: serial("id").primaryKey(),
-  title: text("title").notNull(),
+export const tasks = mysqlTable("tasks", {
+  id: int("id").autoincrement().primaryKey(),
+  title: varchar("title", { length: 255 }).notNull(),
   description: text("description"),
-  status: text("status").notNull().default("todo"), // todo, in_progress, done
-  priority: text("priority").notNull().default("medium"), // low, medium, high
+  status: varchar("status", { length: 20 }).notNull().default("todo"), // todo, in_progress, done
+  priority: varchar("priority", { length: 20 }).notNull().default("medium"), // low, medium, high
   completed: boolean("completed").default(false),
-  assignedToId: integer("assigned_to_id").references(() => users.id),
-  assignedToIds: text("assigned_to_ids").default("[]"),
-  createdById: integer("created_by_id").references(() => users.id),
+  assignedToId: int("assigned_to_id").references(() => users.id),
+  assignedToIds: text("assigned_to_ids"),
+  createdById: int("created_by_id").references(() => users.id),
   attachments: text("attachments").default("[]"),
   dueDate: timestamp("due_date"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const messages = pgTable("messages", {
-  id: serial("id").primaryKey(),
-  fromUserId: integer("from_user_id").notNull().references(() => users.id),
-  toUserId: integer("to_user_id").notNull().references(() => users.id),
+export const messages = mysqlTable("messages", {
+  id: int("id").autoincrement().primaryKey(),
+  fromUserId: int("from_user_id").notNull().references(() => users.id),
+  toUserId: int("to_user_id").notNull().references(() => users.id),
   content: text("content").notNull(),
   readAt: timestamp("read_at"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const taskGroupMessages = pgTable("task_group_messages", {
-  id: serial("id").primaryKey(),
-  taskId: integer("task_id").notNull().references(() => tasks.id),
-  fromUserId: integer("from_user_id").notNull().references(() => users.id),
+export const taskGroupMessages = mysqlTable("task_group_messages", {
+  id: int("id").autoincrement().primaryKey(),
+  taskId: int("task_id").notNull().references(() => tasks.id),
+  fromUserId: int("from_user_id").notNull().references(() => users.id),
   content: text("content").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const taskChatGroups = pgTable("task_chat_groups", {
-  id: serial("id").primaryKey(),
-  taskId: integer("task_id").notNull().references(() => tasks.id).unique(),
-  createdById: integer("created_by_id").notNull().references(() => users.id),
+export const taskChatGroups = mysqlTable("task_chat_groups", {
+  id: int("id").autoincrement().primaryKey(),
+  taskId: int("task_id").notNull().references(() => tasks.id).unique(),
+  createdById: int("created_by_id").notNull().references(() => users.id),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
-export const taskGroupReadStates = pgTable(
+export const taskGroupReadStates = mysqlTable(
   "task_group_read_states",
   {
-    id: serial("id").primaryKey(),
-    taskId: integer("task_id").notNull().references(() => tasks.id),
-    userId: integer("user_id").notNull().references(() => users.id),
+    id: int("id").autoincrement().primaryKey(),
+    taskId: int("task_id").notNull().references(() => tasks.id),
+    userId: int("user_id").notNull().references(() => users.id),
     lastReadAt: timestamp("last_read_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
@@ -64,15 +64,15 @@ export const taskGroupReadStates = pgTable(
   })
 );
 
-export const notifications = pgTable("notifications", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().references(() => users.id),
-  actorUserId: integer("actor_user_id").references(() => users.id),
-  type: text("type").notNull(),
-  title: text("title").notNull(),
+export const notifications = mysqlTable("notifications", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("user_id").notNull().references(() => users.id),
+  actorUserId: int("actor_user_id").references(() => users.id),
+  type: varchar("type", { length: 50 }).notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
   description: text("description").notNull(),
-  entityType: text("entity_type"),
-  entityId: integer("entity_id"),
+  entityType: varchar("entity_type", { length: 50 }),
+  entityId: int("entity_id"),
   readAt: timestamp("read_at"),
   createdAt: timestamp("created_at").defaultNow(),
 });

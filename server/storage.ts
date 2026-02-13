@@ -121,7 +121,9 @@ export class DatabaseStorage implements IStorage {
       ...insertUser,
       password: hashPassword(insertUser.password),
     };
-    const [user] = await db.insert(users).values(userData).returning();
+    const [created] = await db.insert(users).values(userData).$returningId();
+    const user = await this.getUser(created.id);
+    if (!user) throw new Error("Failed to create user");
     return user;
   }
 
@@ -186,15 +188,17 @@ export class DatabaseStorage implements IStorage {
       attachments: attachmentsJson,
       dueDate: dueDateVal,
     };
-    const [task] = await db.insert(tasks).values(toInsert).returning();
+    const [created] = await db.insert(tasks).values(toInsert).$returningId();
+    const task = await this.getTask(created.id);
+    if (!task) throw new Error("Failed to create task");
     try {
-      const attachments = JSON.parse(task.attachments || "[]");
+      const attachments = JSON.parse((task as any).attachments || "[]");
       const parsedAssignedToIds = normalizeAssignedToIds((task as any).assignedToIds, (task as any).assignedToId);
-      const dueDate = task.dueDate instanceof Date ? task.dueDate.toISOString() : (typeof task.dueDate === 'string' ? task.dueDate : null);
+      const dueDate = (task as any).dueDate instanceof Date ? (task as any).dueDate.toISOString() : (typeof (task as any).dueDate === 'string' ? (task as any).dueDate : null);
       return { ...task, attachments, assignedToIds: parsedAssignedToIds, dueDate } as any;
     } catch (e) {
       const parsedAssignedToIds = normalizeAssignedToIds((task as any).assignedToIds, (task as any).assignedToId);
-      const dueDate = task.dueDate instanceof Date ? task.dueDate.toISOString() : (typeof task.dueDate === 'string' ? task.dueDate : null);
+      const dueDate = (task as any).dueDate instanceof Date ? (task as any).dueDate.toISOString() : (typeof (task as any).dueDate === 'string' ? (task as any).dueDate : null);
       return { ...task, attachments: [], assignedToIds: parsedAssignedToIds, dueDate } as any;
     }
   }
@@ -221,19 +225,21 @@ export class DatabaseStorage implements IStorage {
         toUpdate.dueDate = null;
       }
     }
-    const [updated] = await db
+    await db
       .update(tasks)
       .set(toUpdate)
       .where(eq(tasks.id, id))
-      .returning();
+      .execute();
+    const updated = await this.getTask(id);
+    if (!updated) throw new Error("Task not found");
     try {
-      const attachments = JSON.parse(updated.attachments || "[]");
+      const attachments = JSON.parse((updated as any).attachments || "[]");
       const parsedAssignedToIds = normalizeAssignedToIds((updated as any).assignedToIds, (updated as any).assignedToId);
-      const dueDate = updated.dueDate instanceof Date ? updated.dueDate.toISOString() : (typeof updated.dueDate === 'string' ? updated.dueDate : null);
+      const dueDate = (updated as any).dueDate instanceof Date ? (updated as any).dueDate.toISOString() : (typeof (updated as any).dueDate === 'string' ? (updated as any).dueDate : null);
       return { ...updated, attachments, assignedToIds: parsedAssignedToIds, dueDate } as any;
     } catch (e) {
       const parsedAssignedToIds = normalizeAssignedToIds((updated as any).assignedToIds, (updated as any).assignedToId);
-      const dueDate = updated.dueDate instanceof Date ? updated.dueDate.toISOString() : (typeof updated.dueDate === 'string' ? updated.dueDate : null);
+      const dueDate = (updated as any).dueDate instanceof Date ? (updated as any).dueDate.toISOString() : (typeof (updated as any).dueDate === 'string' ? (updated as any).dueDate : null);
       return { ...updated, attachments: [], assignedToIds: parsedAssignedToIds, dueDate } as any;
     }
   }
@@ -261,7 +267,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createMessage(data: InsertMessage & { fromUserId: number; readAt?: Date | null }): Promise<Message> {
-    const [message] = await db
+    const [created] = await db
       .insert(messages)
       .values({
         fromUserId: data.fromUserId,
@@ -269,7 +275,9 @@ export class DatabaseStorage implements IStorage {
         content: data.content,
         readAt: data.readAt ?? null,
       })
-      .returning();
+      .$returningId();
+    const [message] = await db.select().from(messages).where(eq(messages.id, created.id));
+    if (!message) throw new Error("Failed to create message");
     return message;
   }
 
@@ -282,7 +290,9 @@ export class DatabaseStorage implements IStorage {
     const existing = await this.getTaskChatGroup(taskId);
     if (existing) return existing;
     const toInsert: InsertTaskChatGroup = { taskId, createdById };
-    const [group] = await db.insert(taskChatGroups).values(toInsert).returning();
+    const [created] = await db.insert(taskChatGroups).values(toInsert).$returningId();
+    const [group] = await db.select().from(taskChatGroups).where(eq(taskChatGroups.id, created.id));
+    if (!group) throw new Error("Failed to create task chat group");
     return group;
   }
 
@@ -301,14 +311,16 @@ export class DatabaseStorage implements IStorage {
   async createTaskGroupMessage(
     data: Pick<InsertTaskGroupMessage, "taskId" | "content"> & { fromUserId: number }
   ): Promise<TaskGroupMessage> {
-    const [message] = await db
+    const [created] = await db
       .insert(taskGroupMessages)
       .values({
         taskId: data.taskId,
         fromUserId: data.fromUserId,
         content: data.content,
       })
-      .returning();
+      .$returningId();
+    const [message] = await db.select().from(taskGroupMessages).where(eq(taskGroupMessages.id, created.id));
+    if (!message) throw new Error("Failed to create task group message");
     return message;
   }
 
@@ -321,18 +333,23 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertTaskGroupReadState(userId: number, taskId: number, lastReadAt: Date = new Date()): Promise<void> {
+    const existing = await this.getTaskGroupReadState(userId, taskId);
+    if (existing) {
+      await db
+        .update(taskGroupReadStates)
+        .set({ lastReadAt, updatedAt: new Date() })
+        .where(eq(taskGroupReadStates.id, existing.id))
+        .execute();
+      return;
+    }
     const toInsert: InsertTaskGroupReadState = { userId, taskId, lastReadAt };
-    await db
-      .insert(taskGroupReadStates)
-      .values(toInsert)
-      .onConflictDoUpdate({
-        target: [taskGroupReadStates.userId, taskGroupReadStates.taskId],
-        set: { lastReadAt, updatedAt: new Date() },
-      });
+    await db.insert(taskGroupReadStates).values(toInsert).execute();
   }
 
   async createNotification(data: InsertNotification): Promise<Notification> {
-    const [notification] = await db.insert(notifications).values(data).returning();
+    const [created] = await db.insert(notifications).values(data).$returningId();
+    const [notification] = await db.select().from(notifications).where(eq(notifications.id, created.id));
+    if (!notification) throw new Error("Failed to create notification");
     return notification;
   }
 
