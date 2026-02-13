@@ -1,4 +1,4 @@
-import { pgTable, text, serial, boolean, timestamp, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, boolean, timestamp, integer, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -35,6 +35,35 @@ export const messages = pgTable("messages", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const taskGroupMessages = pgTable("task_group_messages", {
+  id: serial("id").primaryKey(),
+  taskId: integer("task_id").notNull().references(() => tasks.id),
+  fromUserId: integer("from_user_id").notNull().references(() => users.id),
+  content: text("content").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const taskChatGroups = pgTable("task_chat_groups", {
+  id: serial("id").primaryKey(),
+  taskId: integer("task_id").notNull().references(() => tasks.id).unique(),
+  createdById: integer("created_by_id").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const taskGroupReadStates = pgTable(
+  "task_group_read_states",
+  {
+    id: serial("id").primaryKey(),
+    taskId: integer("task_id").notNull().references(() => tasks.id),
+    userId: integer("user_id").notNull().references(() => users.id),
+    lastReadAt: timestamp("last_read_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => ({
+    userTaskUnique: uniqueIndex("task_group_read_states_user_task_idx").on(table.userId, table.taskId),
+  })
+);
+
 export const insertUserSchema = createInsertSchema(users)
   .omit({ id: true, createdAt: true })
   .extend({
@@ -53,6 +82,15 @@ export const insertMessageSchema = createInsertSchema(messages)
   .extend({
     content: z.string().min(1, "Message is required").max(1000, "Message is too long"),
   });
+export const insertTaskGroupMessageSchema = createInsertSchema(taskGroupMessages)
+  .omit({ id: true, createdAt: true })
+  .extend({
+    content: z.string().min(1, "Message is required").max(1000, "Message is too long"),
+  });
+export const insertTaskChatGroupSchema = createInsertSchema(taskChatGroups)
+  .omit({ id: true, createdAt: true });
+export const insertTaskGroupReadStateSchema = createInsertSchema(taskGroupReadStates)
+  .omit({ id: true, updatedAt: true });
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -61,3 +99,9 @@ export type InsertTask = z.infer<typeof insertTaskSchema>;
 export type UpdateTaskRequest = Partial<InsertTask>;
 export type Message = typeof messages.$inferSelect;
 export type InsertMessage = z.infer<typeof insertMessageSchema>;
+export type TaskGroupMessage = typeof taskGroupMessages.$inferSelect;
+export type InsertTaskGroupMessage = z.infer<typeof insertTaskGroupMessageSchema>;
+export type TaskChatGroup = typeof taskChatGroups.$inferSelect;
+export type InsertTaskChatGroup = z.infer<typeof insertTaskChatGroupSchema>;
+export type TaskGroupReadState = typeof taskGroupReadStates.$inferSelect;
+export type InsertTaskGroupReadState = z.infer<typeof insertTaskGroupReadStateSchema>;

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { insertMessageSchema, insertTaskSchema, insertUserSchema, messages, tasks, users } from './schema';
+import { insertMessageSchema, insertTaskGroupMessageSchema, insertTaskSchema, insertUserSchema, messages, taskChatGroups, taskGroupMessages, tasks, users } from './schema';
 
 export const errorSchemas = {
   validation: z.object({
@@ -159,6 +159,72 @@ export const api = {
         200: z.object({ success: z.boolean() }),
         400: errorSchemas.validation,
         401: errorSchemas.notFound,
+      },
+    },
+    groups: {
+      method: 'GET' as const,
+      path: '/api/chats/groups',
+      responses: {
+        200: z.array(
+          z.object({
+            group: z.custom<typeof taskChatGroups.$inferSelect>(),
+            task: z.custom<typeof tasks.$inferSelect>(),
+            participantIds: z.array(z.number()),
+          })
+        ),
+        401: errorSchemas.notFound,
+      },
+    },
+    groupsUnread: {
+      method: 'GET' as const,
+      path: '/api/chats/groups/unread',
+      responses: {
+        200: z.object({
+          total: z.number(),
+          byTask: z.record(z.string(), z.number()),
+        }),
+        401: errorSchemas.notFound,
+      },
+    },
+    groupCreate: {
+      method: 'POST' as const,
+      path: '/api/chats/groups/task/:taskId',
+      responses: {
+        201: z.custom<typeof taskChatGroups.$inferSelect>(),
+        400: errorSchemas.validation,
+        401: errorSchemas.notFound,
+        404: errorSchemas.notFound,
+      },
+    },
+    groupMarkRead: {
+      method: 'POST' as const,
+      path: '/api/chats/groups/task/:taskId/read',
+      responses: {
+        200: z.object({ success: z.boolean() }),
+        400: errorSchemas.validation,
+        401: errorSchemas.notFound,
+        404: errorSchemas.notFound,
+      },
+    },
+    groupList: {
+      method: 'GET' as const,
+      path: '/api/chats/groups/task/:taskId',
+      responses: {
+        200: z.array(z.custom<typeof taskGroupMessages.$inferSelect>()),
+        400: errorSchemas.validation,
+        401: errorSchemas.notFound,
+        404: errorSchemas.notFound,
+      },
+    },
+    groupSend: {
+      method: 'POST' as const,
+      path: '/api/chats/groups/task/:taskId/messages',
+      input: insertTaskGroupMessageSchema.pick({ content: true }),
+      responses: {
+        201: z.custom<typeof taskGroupMessages.$inferSelect>(),
+        400: errorSchemas.validation,
+        401: errorSchemas.notFound,
+        404: errorSchemas.notFound,
       },
     },
   },

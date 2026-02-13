@@ -32,6 +32,9 @@ export function Sidebar({
     ws.onmessage = () => {
       queryClient.invalidateQueries({ queryKey: [api.chats.unread.path] });
       queryClient.invalidateQueries({ queryKey: [api.chats.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.chats.groups.path] });
+      queryClient.invalidateQueries({ queryKey: [api.chats.groupsUnread.path] });
+      queryClient.invalidateQueries({ queryKey: ["chat", "task-group"] });
     };
 
     return () => {

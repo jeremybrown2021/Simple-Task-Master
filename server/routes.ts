@@ -61,6 +61,15 @@ function canUserAccessTask(user: any, task: any): boolean {
   return getAssignedUserIds(task).includes(user.id);
 }
 
+function getTaskParticipantIds(task: any): number[] {
+  const ids = new Set<number>();
+  if (typeof task?.createdById === "number" && Number.isFinite(task.createdById)) {
+    ids.add(task.createdById);
+  }
+  getAssignedUserIds(task).forEach((id) => ids.add(id));
+  return Array.from(ids);
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -496,6 +505,183 @@ export async function registerRoutes(
       }
       throw err;
     }
+  });
+
+  app.get(api.chats.groups.path, async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+    const groups = await storage.getTaskChatGroups();
+    const result: Array<{ group: any; task: any; participantIds: number[] }> = [];
+
+    for (const group of groups) {
+      const task = await storage.getTask(group.taskId);
+      if (!task) continue;
+      const participantIds = getTaskParticipantIds(task);
+      if (!participantIds.includes(req.user.id)) continue;
+      result.push({ group, task, participantIds });
+    }
+
+    res.json(result);
+  });
+
+  app.get(api.chats.groupsUnread.path, async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+    const groups = await storage.getTaskChatGroups();
+    const byTask: Record<string, number> = {};
+    let total = 0;
+
+    for (const group of groups) {
+      const task = await storage.getTask(group.taskId);
+      if (!task) continue;
+      const participantIds = getTaskParticipantIds(task);
+      if (!participantIds.includes(req.user.id)) continue;
+
+      const messages = await storage.getTaskGroupMessages(group.taskId);
+      const readState = await storage.getTaskGroupReadState(req.user.id, group.taskId);
+      const unreadCount = messages.filter((m) => {
+        if (m.fromUserId === req.user.id) return false;
+        if (!readState?.lastReadAt) return true;
+        return !!m.createdAt && new Date(m.createdAt) > new Date(readState.lastReadAt);
+      }).length;
+
+      byTask[String(group.taskId)] = unreadCount;
+      total += unreadCount;
+    }
+
+    res.json({ total, byTask });
+  });
+
+  app.post(api.chats.groupCreate.path, async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+    const taskId = Number(req.params.taskId);
+    if (!Number.isFinite(taskId)) {
+      return res.status(400).json({ message: "Invalid task id" });
+    }
+    const task = await storage.getTask(taskId);
+    if (!task) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+    if (!canUserAccessTask(req.user, task)) {
+      return res.status(403).json({ message: "Not authorized to create this task group" });
+    }
+
+    const group = await storage.ensureTaskChatGroup(taskId, req.user.id);
+    const existingMessages = await storage.getTaskGroupMessages(taskId);
+    const latestMessageAt = existingMessages.length > 0
+      ? new Date(existingMessages[existingMessages.length - 1].createdAt as any)
+      : new Date();
+    await storage.upsertTaskGroupReadState(req.user.id, taskId, latestMessageAt);
+    getTaskParticipantIds(task).forEach((participantId) => {
+      emitToUser(participantId, {
+        type: "task-group:created",
+        payload: { taskId },
+      });
+    });
+    res.status(201).json(group);
+  });
+
+  app.get(api.chats.groupList.path, async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+    const taskId = Number(req.params.taskId);
+    if (!Number.isFinite(taskId)) {
+      return res.status(400).json({ message: "Invalid task id" });
+    }
+    const task = await storage.getTask(taskId);
+    if (!task) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+    if (!canUserAccessTask(req.user, task)) {
+      return res.status(403).json({ message: "Not authorized to access this task group" });
+    }
+    const existingGroup = await storage.getTaskChatGroup(taskId);
+    if (!existingGroup) {
+      return res.status(404).json({ message: "Task group not found" });
+    }
+    const groupMessages = await storage.getTaskGroupMessages(taskId);
+    res.json(groupMessages);
+  });
+
+  app.post(api.chats.groupSend.path, async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+    const taskId = Number(req.params.taskId);
+    if (!Number.isFinite(taskId)) {
+      return res.status(400).json({ message: "Invalid task id" });
+    }
+    const task = await storage.getTask(taskId);
+    if (!task) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+    if (!canUserAccessTask(req.user, task)) {
+      return res.status(403).json({ message: "Not authorized to message this task group" });
+    }
+    await storage.ensureTaskChatGroup(taskId, req.user.id);
+
+    try {
+      const input = api.chats.groupSend.input.parse(req.body);
+      const message = await storage.createTaskGroupMessage({
+        taskId,
+        content: input.content,
+        fromUserId: req.user.id,
+      });
+
+      const participantIds = getTaskParticipantIds(task);
+      participantIds.forEach((participantId) => {
+        emitToUser(participantId, {
+          type: "task-group:new",
+          payload: { taskId, fromUserId: req.user.id },
+        });
+      });
+
+      res.status(201).json(message);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({
+          message: err.errors[0].message,
+          field: err.errors[0].path.join("."),
+        });
+      }
+      throw err;
+    }
+  });
+
+  app.post(api.chats.groupMarkRead.path, async (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ message: "Not authenticated" });
+    }
+    const taskId = Number(req.params.taskId);
+    if (!Number.isFinite(taskId)) {
+      return res.status(400).json({ message: "Invalid task id" });
+    }
+    const task = await storage.getTask(taskId);
+    if (!task) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+    if (!canUserAccessTask(req.user, task)) {
+      return res.status(403).json({ message: "Not authorized to mark this group as read" });
+    }
+    const existingGroup = await storage.getTaskChatGroup(taskId);
+    if (!existingGroup) {
+      return res.status(404).json({ message: "Task group not found" });
+    }
+    const groupMessages = await storage.getTaskGroupMessages(taskId);
+    const latestMessageAt = groupMessages.length > 0
+      ? new Date(groupMessages[groupMessages.length - 1].createdAt as any)
+      : new Date();
+    await storage.upsertTaskGroupReadState(req.user.id, taskId, latestMessageAt);
+    emitToUser(req.user.id, {
+      type: "task-group:read",
+      payload: { taskId },
+    });
+    res.json({ success: true });
   });
 
   // Seed Data

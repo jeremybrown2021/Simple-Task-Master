@@ -1,11 +1,20 @@
 import { db } from "./db";
 import {
   messages,
+  taskChatGroups,
+  taskGroupReadStates,
+  taskGroupMessages,
   tasks,
   users,
   type Message,
   type InsertMessage,
+  type InsertTaskGroupMessage,
+  type InsertTaskChatGroup,
+  type InsertTaskGroupReadState,
   type Task,
+  type TaskGroupMessage,
+  type TaskChatGroup,
+  type TaskGroupReadState,
   type User,
   type InsertTask,
   type InsertUser,
@@ -34,6 +43,13 @@ export interface IStorage {
   getChatUsers(currentUserId: number): Promise<User[]>;
   getMessagesBetweenUsers(userId: number, otherUserId: number): Promise<Message[]>;
   createMessage(data: InsertMessage & { fromUserId: number }): Promise<Message>;
+  getTaskChatGroup(taskId: number): Promise<TaskChatGroup | undefined>;
+  ensureTaskChatGroup(taskId: number, createdById: number): Promise<TaskChatGroup>;
+  getTaskChatGroups(): Promise<TaskChatGroup[]>;
+  getTaskGroupMessages(taskId: number): Promise<TaskGroupMessage[]>;
+  createTaskGroupMessage(data: Pick<InsertTaskGroupMessage, "taskId" | "content"> & { fromUserId: number }): Promise<TaskGroupMessage>;
+  getTaskGroupReadState(userId: number, taskId: number): Promise<TaskGroupReadState | undefined>;
+  upsertTaskGroupReadState(userId: number, taskId: number, lastReadAt?: Date): Promise<void>;
   markMessagesAsRead(userId: number, otherUserId: number): Promise<void>;
   getUnreadCountsForUser(userId: number): Promise<{ total: number; byUser: Record<string, number> }>;
 }
@@ -246,6 +262,64 @@ export class DatabaseStorage implements IStorage {
       })
       .returning();
     return message;
+  }
+
+  async getTaskChatGroup(taskId: number): Promise<TaskChatGroup | undefined> {
+    const [group] = await db.select().from(taskChatGroups).where(eq(taskChatGroups.taskId, taskId));
+    return group;
+  }
+
+  async ensureTaskChatGroup(taskId: number, createdById: number): Promise<TaskChatGroup> {
+    const existing = await this.getTaskChatGroup(taskId);
+    if (existing) return existing;
+    const toInsert: InsertTaskChatGroup = { taskId, createdById };
+    const [group] = await db.insert(taskChatGroups).values(toInsert).returning();
+    return group;
+  }
+
+  async getTaskChatGroups(): Promise<TaskChatGroup[]> {
+    return await db.select().from(taskChatGroups).orderBy(asc(taskChatGroups.createdAt));
+  }
+
+  async getTaskGroupMessages(taskId: number): Promise<TaskGroupMessage[]> {
+    return await db
+      .select()
+      .from(taskGroupMessages)
+      .where(eq(taskGroupMessages.taskId, taskId))
+      .orderBy(asc(taskGroupMessages.createdAt));
+  }
+
+  async createTaskGroupMessage(
+    data: Pick<InsertTaskGroupMessage, "taskId" | "content"> & { fromUserId: number }
+  ): Promise<TaskGroupMessage> {
+    const [message] = await db
+      .insert(taskGroupMessages)
+      .values({
+        taskId: data.taskId,
+        fromUserId: data.fromUserId,
+        content: data.content,
+      })
+      .returning();
+    return message;
+  }
+
+  async getTaskGroupReadState(userId: number, taskId: number): Promise<TaskGroupReadState | undefined> {
+    const [state] = await db
+      .select()
+      .from(taskGroupReadStates)
+      .where(and(eq(taskGroupReadStates.userId, userId), eq(taskGroupReadStates.taskId, taskId)));
+    return state;
+  }
+
+  async upsertTaskGroupReadState(userId: number, taskId: number, lastReadAt: Date = new Date()): Promise<void> {
+    const toInsert: InsertTaskGroupReadState = { userId, taskId, lastReadAt };
+    await db
+      .insert(taskGroupReadStates)
+      .values(toInsert)
+      .onConflictDoUpdate({
+        target: [taskGroupReadStates.userId, taskGroupReadStates.taskId],
+        set: { lastReadAt, updatedAt: new Date() },
+      });
   }
 
   async markMessagesAsRead(userId: number, otherUserId: number): Promise<void> {

@@ -98,3 +98,113 @@ export function useMarkChatRead() {
     },
   });
 }
+
+export function useTaskGroupMessages(taskId?: number) {
+  return useQuery({
+    queryKey: ["chat", "task-group", taskId],
+    queryFn: async () => {
+      const res = await fetch(buildUrl(api.chats.groupList.path, { taskId: taskId! }), {
+        credentials: "include",
+      });
+      const body = await readJsonOrThrow(res, "Failed to fetch task group messages");
+      return api.chats.groupList.responses[200].parse(body);
+    },
+    enabled: !!taskId,
+    refetchInterval: false,
+  });
+}
+
+export function useTaskGroups() {
+  return useQuery({
+    queryKey: [api.chats.groups.path],
+    queryFn: async () => {
+      const res = await fetch(api.chats.groups.path, { credentials: "include" });
+      const body = await readJsonOrThrow(res, "Failed to fetch task groups");
+      return api.chats.groups.responses[200].parse(body);
+    },
+    refetchInterval: false,
+  });
+}
+
+export function useTaskGroupUnreadCounts() {
+  return useQuery({
+    queryKey: [api.chats.groupsUnread.path],
+    queryFn: async () => {
+      const res = await fetch(api.chats.groupsUnread.path, { credentials: "include" });
+      const body = await readJsonOrThrow(res, "Failed to fetch task group unread counts");
+      return api.chats.groupsUnread.responses[200].parse(body);
+    },
+    refetchInterval: false,
+    staleTime: 0,
+  });
+}
+
+export function useEnsureTaskGroup() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (taskId: number) => {
+      const res = await fetch(buildUrl(api.chats.groupCreate.path, { taskId }), {
+        method: api.chats.groupCreate.method,
+        credentials: "include",
+      });
+      const body = await readJsonOrThrow(res, "Failed to create task group");
+      return api.chats.groupCreate.responses[201].parse(body);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.chats.groups.path] });
+    },
+  });
+}
+
+export function useMarkTaskGroupRead() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (taskId: number) => {
+      const res = await fetch(buildUrl(api.chats.groupMarkRead.path, { taskId }), {
+        method: api.chats.groupMarkRead.method,
+        credentials: "include",
+      });
+      await readJsonOrThrow(res, "Failed to mark task group as read");
+    },
+    onSuccess: (_data, taskId) => {
+      queryClient.setQueryData([api.chats.groupsUnread.path], (prev: any) => {
+        if (!prev || typeof prev !== "object") return prev;
+        const byTask = { ...(prev.byTask || {}) };
+        const current = Number(byTask[String(taskId)] || 0);
+        byTask[String(taskId)] = 0;
+        return {
+          ...prev,
+          total: Math.max(0, Number(prev.total || 0) - current),
+          byTask,
+        };
+      });
+      queryClient.invalidateQueries({ queryKey: [api.chats.groupsUnread.path] });
+    },
+  });
+}
+
+export function useSendTaskGroupMessage(taskId?: number) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: { content: string }) => {
+      const validated = api.chats.groupSend.input.parse(payload);
+      const res = await fetch(buildUrl(api.chats.groupSend.path, { taskId: taskId! }), {
+        method: api.chats.groupSend.method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(validated),
+        credentials: "include",
+      });
+      const body = await readJsonOrThrow(res, "Failed to send task group message");
+      return api.chats.groupSend.responses[201].parse(body);
+    },
+    onSuccess: () => {
+      if (taskId) {
+        queryClient.invalidateQueries({ queryKey: ["chat", "task-group", taskId] });
+      }
+      queryClient.invalidateQueries({ queryKey: [api.chats.groupsUnread.path] });
+    },
+  });
+}

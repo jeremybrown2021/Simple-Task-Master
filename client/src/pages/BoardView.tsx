@@ -11,6 +11,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { useUsers } from "@/hooks/use-users";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { useLocation } from "wouter";
+import { useEnsureTaskGroup } from "@/hooks/use-chat";
 
 const COLUMNS = [
   { id: "todo", title: "To Do", color: "bg-slate-500" },
@@ -39,8 +41,10 @@ export default function BoardView() {
   const { data: users } = useUsers();
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
+  const ensureTaskGroup = useEnsureTaskGroup();
   const { toast } = useToast();
   const { user } = useAuth();
+  const [, setLocation] = useLocation();
 
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -105,6 +109,44 @@ export default function BoardView() {
       setSelectedTask(task);
       setIsDetailDialogOpen(true);
     }
+  };
+
+  const handleMessage = async (task: Task) => {
+    if (!user?.id) return;
+    const participantIds = Array.from(
+      new Set<number>(
+        [task.createdById, ...getAssignedToIds(task)].filter(
+          (id): id is number => typeof id === "number" && Number.isFinite(id)
+        )
+      )
+    );
+    const otherParticipantIds = participantIds.filter((id) => id !== user.id);
+
+    if (otherParticipantIds.length === 1) {
+      setLocation(`/chat?userId=${otherParticipantIds[0]}`);
+      return;
+    }
+
+    if (otherParticipantIds.length > 1) {
+      try {
+        await ensureTaskGroup.mutateAsync(task.id);
+      } catch (error) {
+        toast({
+          title: "Chat unavailable",
+          description: error instanceof Error ? error.message : "Unable to create task group chat",
+          variant: "destructive",
+        });
+        return;
+      }
+      setLocation(`/chat?taskId=${task.id}`);
+      return;
+    }
+
+    toast({
+      title: "No participants",
+      description: "This task has no other chat participants yet.",
+      variant: "destructive",
+    });
   };
 
   const baseVisibleTasks = (tasks || []).filter((task) => {
@@ -307,6 +349,9 @@ export default function BoardView() {
                           onEdit={handleEdit}
                           onDelete={handleDelete}
                           onView={handleView}
+                          onMessage={(task) => {
+                            void handleMessage(task);
+                          }}
                         />
                       ))}
                       {provided.placeholder}

@@ -4,17 +4,54 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ChevronLeft, Loader2, Mic, MicOff, Phone, PhoneOff, Search, Send } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { useMarkChatRead, useMessages, useSendMessage, useUnreadCounts } from "@/hooks/use-chat";
+import { useMarkChatRead, useMarkTaskGroupRead, useMessages, useSendMessage, useSendTaskGroupMessage, useTaskGroupMessages, useTaskGroupUnreadCounts, useTaskGroups, useUnreadCounts } from "@/hooks/use-chat";
 import { useUsers } from "@/hooks/use-users";
 import { useToast } from "@/hooks/use-toast";
+import { useLocation } from "wouter";
+import { useTasks } from "@/hooks/use-tasks";
+
+function getTaskMemberIds(task: any): number[] {
+  const rawAssignedToIds = task?.assignedToIds;
+  let assignedToIds: number[] = [];
+
+  if (Array.isArray(rawAssignedToIds)) {
+    assignedToIds = rawAssignedToIds.map((id: unknown) => Number(id)).filter((id) => Number.isFinite(id));
+  } else if (typeof rawAssignedToIds === "string") {
+    try {
+      const parsed = JSON.parse(rawAssignedToIds);
+      if (Array.isArray(parsed)) {
+        assignedToIds = parsed.map((id: unknown) => Number(id)).filter((id) => Number.isFinite(id));
+      }
+    } catch {
+      assignedToIds = [];
+    }
+  }
+
+  if (assignedToIds.length === 0 && task?.assignedToId) {
+    assignedToIds = [task.assignedToId];
+  }
+
+  return Array.from(
+    new Set<number>(
+      [task?.createdById, ...assignedToIds].filter(
+        (id): id is number => typeof id === "number" && Number.isFinite(id)
+      )
+    )
+  );
+}
 
 export default function Chat() {
+  const [location, setLocation] = useLocation();
   const { user } = useAuth();
   const { toast } = useToast();
   const { data: users, isLoading: isUsersLoading } = useUsers();
+  const { data: tasks } = useTasks();
   const { data: unreadCounts } = useUnreadCounts();
+  const { data: taskGroupUnreadCounts } = useTaskGroupUnreadCounts();
   const markChatRead = useMarkChatRead();
+  const markTaskGroupRead = useMarkTaskGroupRead();
   const [activeUserId, setActiveUserId] = useState<number | undefined>(undefined);
+  const [activeTaskGroupId, setActiveTaskGroupId] = useState<number | undefined>(undefined);
   const [draft, setDraft] = useState("");
   const [search, setSearch] = useState("");
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -66,7 +103,42 @@ export default function Chat() {
     return selfHaystack.includes(q) || selfHaystack.replace(/\s+/g, "").includes(q.replace(/\s+/g, ""));
   }, [search, user]);
 
+  const { data: taskGroupsData } = useTaskGroups();
+  const taskGroups = useMemo(() => taskGroupsData || [], [taskGroupsData]);
+
+  const filteredTaskGroups = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return taskGroups;
+    return taskGroups.filter((entry) => {
+      const title = (entry.task?.title || "").toLowerCase();
+      const description = (entry.task?.description || "").toLowerCase();
+      return title.includes(q) || description.includes(q);
+    });
+  }, [search, taskGroups]);
+
   useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    const userIdParam = Number(query.get("userId"));
+    const taskIdParam = Number(query.get("taskId"));
+
+    if (Number.isFinite(taskIdParam) && taskIdParam > 0) {
+      setActiveTaskGroupId(taskIdParam);
+      setActiveUserId(undefined);
+      return;
+    }
+
+    if (Number.isFinite(userIdParam) && userIdParam > 0) {
+      setActiveUserId(userIdParam);
+      setActiveTaskGroupId(undefined);
+      return;
+    }
+
+    setActiveTaskGroupId(undefined);
+    setActiveUserId(undefined);
+  }, [location]);
+
+  useEffect(() => {
+    if (activeTaskGroupId) return;
     if (filteredUsers.length === 0) {
       setActiveUserId(undefined);
       return;
@@ -74,11 +146,23 @@ export default function Chat() {
     if (activeUserId && !filteredUsers.some((u) => u.id === activeUserId)) {
       setActiveUserId(undefined);
     }
-  }, [filteredUsers, activeUserId]);
+  }, [filteredUsers, activeUserId, activeTaskGroupId]);
 
   const activeUser = useMemo(
     () => filteredUsers.find((u) => u.id === activeUserId),
     [filteredUsers, activeUserId]
+  );
+  const activeTask = useMemo(
+    () => (tasks || []).find((t) => t.id === activeTaskGroupId) || taskGroups.find((entry) => entry.task.id === activeTaskGroupId)?.task,
+    [tasks, taskGroups, activeTaskGroupId]
+  );
+  const activeTaskParticipantIds = useMemo(() => {
+    if (!activeTask) return [];
+    return getTaskMemberIds(activeTask);
+  }, [activeTask]);
+  const activeTaskParticipants = useMemo(
+    () => (users || []).filter((u) => activeTaskParticipantIds.includes(u.id)),
+    [users, activeTaskParticipantIds]
   );
   const incomingCallFromUser = useMemo(
     () => teamMembers.find((u) => u.id === incomingCallFromUserId),
@@ -87,6 +171,15 @@ export default function Chat() {
 
   const { data: messages, isLoading: isMessagesLoading } = useMessages(activeUserId);
   const sendMessage = useSendMessage(activeUserId);
+  const { data: taskGroupMessages, isLoading: isTaskGroupMessagesLoading } = useTaskGroupMessages(activeTaskGroupId);
+  const sendTaskGroupMessage = useSendTaskGroupMessage(activeTaskGroupId);
+
+  const handleSelectTaskGroup = (taskId: number) => {
+    setActiveTaskGroupId(taskId);
+    setActiveUserId(undefined);
+    setLocation(`/chat?taskId=${taskId}`);
+    void markTaskGroupRead.mutateAsync(taskId).catch(() => {});
+  };
 
   useEffect(() => {
     isCallingRef.current = isCalling;
@@ -159,7 +252,21 @@ export default function Chat() {
     );
   }, []);
 
-  const messageCount = Array.isArray(messages) ? messages.length : 0;
+  const messageCount = activeTaskGroupId
+    ? (Array.isArray(taskGroupMessages) ? taskGroupMessages.length : 0)
+    : (Array.isArray(messages) ? messages.length : 0);
+
+  useEffect(() => {
+    if (!activeTaskGroupId) return;
+    void markTaskGroupRead.mutateAsync(activeTaskGroupId).catch(() => {});
+  }, [activeTaskGroupId]);
+
+  useEffect(() => {
+    if (!activeTaskGroupId) return;
+    if (!Array.isArray(taskGroupMessages)) return;
+    if (taskGroupMessages.length === 0) return;
+    void markTaskGroupRead.mutateAsync(activeTaskGroupId).catch(() => {});
+  }, [activeTaskGroupId, taskGroupMessages?.length]);
 
   useEffect(() => {
     setAutoScrollEnabled(true);
@@ -246,7 +353,7 @@ export default function Chat() {
   useEffect(() => {
     if (!autoScrollEnabled) return;
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messageCount, activeUserId, autoScrollEnabled]);
+  }, [messageCount, activeUserId, activeTaskGroupId, autoScrollEnabled]);
 
   const handleMessagesScroll = () => {
     const el = messagesContainerRef.current;
@@ -438,11 +545,23 @@ export default function Chat() {
     };
   }, []);
 
+  const isGroupMode = !!activeTaskGroupId;
+  const showConversationPanel = !!activeUserId || !!activeTaskGroupId;
+  const displayedMessages = isGroupMode ? (taskGroupMessages || []) : (messages || []);
+  const isDisplayedMessagesLoading = isGroupMode ? isTaskGroupMessagesLoading : isMessagesLoading;
+  const sendPending = isGroupMode ? sendTaskGroupMessage.isPending : sendMessage.isPending;
+
   const handleSend = async () => {
     const content = draft.trim();
-    if (!content || !activeUserId) return;
+    if (!content) return;
     try {
-      await sendMessage.mutateAsync({ toUserId: activeUserId, content });
+      if (isGroupMode && activeTaskGroupId) {
+        await sendTaskGroupMessage.mutateAsync({ content });
+      } else if (activeUserId) {
+        await sendMessage.mutateAsync({ toUserId: activeUserId, content });
+      } else {
+        return;
+      }
       setDraft("");
     } catch (error) {
       toast({
@@ -455,11 +574,19 @@ export default function Chat() {
 
   const handleSelectUser = async (userId: number) => {
     setActiveUserId(userId);
+    setActiveTaskGroupId(undefined);
+    setLocation(`/chat?userId=${userId}`);
     try {
       await markChatRead.mutateAsync(userId);
     } catch {
       // non-blocking
     }
+  };
+
+  const clearActiveConversation = () => {
+    setActiveUserId(undefined);
+    setActiveTaskGroupId(undefined);
+    setLocation("/chat");
   };
 
   if (isUsersLoading) {
@@ -472,7 +599,7 @@ export default function Chat() {
 
   return (
     <div className="h-[calc(100vh-7.5rem)] md:h-[calc(100vh-10rem)] border border-border rounded-xl overflow-hidden bg-card grid grid-cols-1 md:grid-cols-[280px_1fr]">
-      <aside className={`border-r border-border/60 bg-muted/20 flex-col min-h-0 ${activeUserId ? "hidden md:flex" : "flex"}`}>
+      <aside className={`border-r border-border/60 bg-muted/20 flex-col min-h-0 ${showConversationPanel ? "hidden md:flex" : "flex"}`}>
         <div className="p-4 border-b border-border/60 shrink-0">
           <h3 className="font-semibold text-sm text-foreground">Team Chat</h3>
           <p className="text-xs text-muted-foreground mt-1">Search and select a team user</p>
@@ -490,6 +617,46 @@ export default function Chat() {
           </p>
         </div>
         <div className="p-2 space-y-1 overflow-y-auto flex-1 min-h-0">
+          {filteredTaskGroups.length > 0 && (
+            <>
+              <p className="px-3 pt-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Task Groups
+              </p>
+              {filteredTaskGroups.map((entry) => {
+                const task = entry.task;
+                const isActive = task.id === activeTaskGroupId;
+                const membersCount = entry.participantIds.length;
+                const unread = taskGroupUnreadCounts?.byTask?.[String(task.id)] || 0;
+                return (
+                  <button
+                    key={`group-${task.id}`}
+                    onClick={() => handleSelectTaskGroup(task.id)}
+                    className={`w-full text-left px-3 py-2.5 rounded-lg transition-colors flex items-center gap-2 ${
+                      isActive ? "bg-primary/10 text-primary" : "hover:bg-muted text-foreground"
+                    }`}
+                  >
+                    <div className="h-7 w-7 rounded-md border border-primary/15 bg-primary/5 flex items-center justify-center text-[11px] font-semibold text-primary">
+                      #
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{task.title}</p>
+                      <p className="text-[11px] text-muted-foreground">{membersCount} members</p>
+                    </div>
+                    {unread > 0 && (
+                      <span className="ml-auto min-w-5 h-5 px-1 rounded-full bg-destructive text-destructive-foreground text-[10px] font-semibold flex items-center justify-center">
+                        {unread > 99 ? "99+" : unread}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+              <div className="my-2 h-px bg-border/60" />
+            </>
+          )}
+
+          <p className="px-3 pt-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Direct Messages
+          </p>
           {filteredUsers.map((u) => {
             const isActive = u.id === activeUserId;
             const unread = unreadCounts?.byUser?.[String(u.id)] || 0;
@@ -521,17 +688,17 @@ export default function Chat() {
               </button>
             );
           })}
-          {filteredUsers.length === 0 && (
+          {filteredUsers.length === 0 && filteredTaskGroups.length === 0 && (
             <p className="text-xs text-muted-foreground px-3 py-2">
               {searchingSelf
-                ? "You cannot chat with your own account. Search another team user."
-                : "No user found."}
+                ? "You cannot chat with your own account. Search another team user or group."
+                : "No user or group found."}
             </p>
           )}
         </div>
       </aside>
 
-      <section className={`flex-col min-h-0 ${!activeUserId ? "hidden md:flex" : "flex"}`}>
+      <section className={`flex-col min-h-0 ${!showConversationPanel ? "hidden md:flex" : "flex"}`}>
         <div className="px-5 py-4 border-b border-border/60 bg-background">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
@@ -540,15 +707,22 @@ export default function Chat() {
                 variant="ghost"
                 size="icon"
                 className="md:hidden h-8 w-8"
-                onClick={() => setActiveUserId(undefined)}
+                onClick={clearActiveConversation}
               >
                 <ChevronLeft className="w-4 h-4" />
               </Button>
               <div>
-              <h3 className="font-semibold">{activeUser?.name || "Select user"}</h3>
-              <p className="text-xs text-muted-foreground">Logged in as {user?.name}</p>
+              <h3 className="font-semibold">
+                {isGroupMode ? (activeTask?.title ? `Task Group: ${activeTask.title}` : "Task Group") : (activeUser?.name || "Select user")}
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                {isGroupMode
+                  ? `Participants: ${activeTaskParticipants.map((p) => p.name).join(", ")}`
+                  : `Logged in as ${user?.name}`}
+              </p>
               </div>
             </div>
+            {!isGroupMode && (
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="button"
@@ -581,10 +755,11 @@ export default function Chat() {
                 <span className="hidden sm:inline">End</span>
               </Button>
             </div>
+            )}
           </div>
         </div>
 
-        {(incomingCallFromUserId || isCalling || isInCall) && (
+        {!isGroupMode && (incomingCallFromUserId || isCalling || isInCall) && (
           <div className="p-3 border-b border-border/60 bg-muted/20 space-y-3">
             {incomingCallFromUserId && (
               <div className="rounded-md border bg-background p-3 flex items-center justify-between gap-3">
@@ -617,15 +792,16 @@ export default function Chat() {
           onScroll={handleMessagesScroll}
           className="flex-1 min-h-0 overflow-y-auto p-5 space-y-3 bg-background"
         >
-          {isMessagesLoading ? (
+          {isDisplayedMessagesLoading ? (
             <div className="h-full flex items-center justify-center">
               <Loader2 className="w-6 h-6 animate-spin text-primary" />
             </div>
-          ) : !activeUserId ? (
-            <p className="text-sm text-muted-foreground">Select a user to start chat.</p>
-          ) : messages && messages.length > 0 ? (
-            messages.map((msg) => {
+          ) : !showConversationPanel ? (
+            <p className="text-sm text-muted-foreground">Select a user or task group to start chat.</p>
+          ) : displayedMessages.length > 0 ? (
+            displayedMessages.map((msg) => {
               const mine = msg.fromUserId === user?.id;
+              const sender = (users || []).find((u) => u.id === msg.fromUserId);
               return (
                 <div key={msg.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
                   <div
@@ -634,6 +810,11 @@ export default function Chat() {
                       : "bg-muted/40 text-foreground border-border"
                       }`}
                   >
+                    {isGroupMode && !mine && (
+                      <p className="text-[10px] font-semibold mb-1 text-muted-foreground">
+                        {sender?.name || "Unknown"}
+                      </p>
+                    )}
                     <p className="text-sm whitespace-pre-wrap break-words">{msg.content}</p>
                     <p className={`text-[10px] mt-1 ${mine ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
                       {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
@@ -645,12 +826,17 @@ export default function Chat() {
           ) : (
             <p className="text-sm text-muted-foreground">No messages yet. Start the conversation.</p>
           )}
-          {!!(messages as any)?.message && (
-            <p className="text-xs text-destructive">{String((messages as any).message)}</p>
+          {!!(displayedMessages as any)?.message && (
+            <p className="text-xs text-destructive">{String((displayedMessages as any).message)}</p>
           )}
           {sendMessage.isError && (
             <p className="text-xs text-destructive">
               {sendMessage.error instanceof Error ? sendMessage.error.message : "Failed to send message"}
+            </p>
+          )}
+          {sendTaskGroupMessage.isError && (
+            <p className="text-xs text-destructive">
+              {sendTaskGroupMessage.error instanceof Error ? sendTaskGroupMessage.error.message : "Failed to send group message"}
             </p>
           )}
           <div ref={messagesEndRef} />
@@ -668,16 +854,16 @@ export default function Chat() {
             <Input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder={activeUserId ? "Type a message..." : "Select user first"}
-              disabled={!activeUserId || sendMessage.isPending}
+              placeholder={showConversationPanel ? "Type a message..." : "Select user or task group first"}
+              disabled={!showConversationPanel || sendPending}
               className="h-11"
             />
             <Button
               type="submit"
-              disabled={!activeUserId || !draft.trim() || sendMessage.isPending}
+              disabled={!showConversationPanel || !draft.trim() || sendPending}
               className="h-11 px-4"
             >
-              {sendMessage.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              {sendPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             </Button>
           </form>
         </div>

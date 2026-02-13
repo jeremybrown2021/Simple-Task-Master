@@ -2,7 +2,7 @@ import { Draggable } from "@hello-pangea/dnd";
 import { type Task } from "@shared/schema";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Clock, GripVertical, MoreHorizontal, User as UserIcon } from "lucide-react";
+import { Clock, GripVertical, MessageSquare, MoreHorizontal, User as UserIcon } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,6 +20,7 @@ interface TaskCardProps {
   onEdit: (task: Task) => void;
   onDelete: (id: number) => void;
   onView?: (task: Task) => void;
+  onMessage?: (task: Task) => void;
 }
 
 const priorityColors = {
@@ -28,7 +29,7 @@ const priorityColors = {
   high: "bg-orange-50 text-orange-600 border-orange-200",
 };
 
-export function TaskCard({ task, index, canEdit, onEdit, onDelete, onView }: TaskCardProps) {
+export function TaskCard({ task, index, canEdit, onEdit, onDelete, onView, onMessage }: TaskCardProps) {
   const { data: users } = useUsers();
   const { user } = useAuth();
   const rawAssignedToIds = (task as any).assignedToIds;
@@ -62,6 +63,14 @@ export function TaskCard({ task, index, canEdit, onEdit, onDelete, onView }: Tas
     const assignedNames = assignedUsers.map((u) => u.name).join(", ");
     return `${createdByUser.name} assigned to ${assignedNames}`;
   })();
+  const canOpenChat = (() => {
+    if (!user?.id) return false;
+    const participantIds = new Set<number>(
+      [task.createdById, ...assignedToIds].filter((id): id is number => typeof id === "number" && Number.isFinite(id))
+    );
+    participantIds.delete(user.id);
+    return participantIds.size > 0;
+  })();
 
   return (
     <Draggable draggableId={String(task.id)} index={index} isDragDisabled={!canEdit}>
@@ -87,35 +96,50 @@ export function TaskCard({ task, index, canEdit, onEdit, onDelete, onView }: Tas
                   {task.priority}
                 </Badge>
 
-                {canEdit && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      className="opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100 outline-none"
-                      onClick={(e) => e.stopPropagation()}
+                <div className="flex items-center gap-1">
+                  {canOpenChat && onMessage && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onMessage(task);
+                      }}
+                      className="opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity focus:opacity-100 outline-none p-1 rounded hover:bg-muted"
+                      aria-label="Open task chat"
                     >
-                      <MoreHorizontal className="w-4 h-4 text-muted-foreground hover:text-foreground" />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onEdit(task);
-                        }}
+                      <MessageSquare className="w-4 h-4 text-muted-foreground hover:text-foreground" />
+                    </button>
+                  )}
+
+                  {canEdit && (
+                    <DropdownMenu>
+                    <DropdownMenuTrigger
+                        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity focus:opacity-100 outline-none"
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        Edit
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        className="text-destructive focus:text-destructive"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDelete(task.id);
-                        }}
-                      >
-                        Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
+                        <MoreHorizontal className="w-4 h-4 text-muted-foreground hover:text-foreground" />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEdit(task);
+                          }}
+                        >
+                          Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="text-destructive focus:text-destructive"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDelete(task.id);
+                          }}
+                        >
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                </div>
               </div>
 
               <h4 className="font-semibold text-sm mb-1 line-clamp-2">{task.title}</h4>
