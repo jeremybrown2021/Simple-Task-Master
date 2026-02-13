@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, User as UserIcon } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
 
 interface TaskDialogProps {
   open: boolean;
@@ -24,6 +25,7 @@ export function TaskDialog({ open, onOpenChange, task }: TaskDialogProps) {
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
   const { data: users } = useUsers();
+  const { user: currentUser } = useAuth();
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [assigneeSearch, setAssigneeSearch] = useState("");
@@ -94,8 +96,8 @@ export function TaskDialog({ open, onOpenChange, task }: TaskDialogProps) {
   };
 
   const assigneeUsers = useMemo(
-    () => (users || []).filter((user) => user.role !== "admin"),
-    [users]
+    () => (users || []).filter((u) => u.role !== "admin" && u.id !== currentUser?.id),
+    [users, currentUser?.id]
   );
 
   const filteredAssigneeUsers = useMemo(() => {
